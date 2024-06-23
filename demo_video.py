@@ -149,6 +149,7 @@ if __name__ == "__main__":
     parser.add_argument("--nms_kernel_size", type=float, default=3)
     parser.add_argument("--fov", type=float, default=60)
     parser.add_argument("--distance", type=int, default=0, choices=[0,1], help='add distance on the reprojected mesh')
+    parser.add_argument("--inference_id", type=str)
     args = parser.parse_args()
 
     dict_args = vars(args)
@@ -167,7 +168,10 @@ if __name__ == "__main__":
     assert len(list_input_path) > 0, 'No frames to infer'
     print(f'The number of images to infer: {len(list_input_path)}')
 
-    inference_id = f'{vid_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+    if args.inference_id:
+        inference_id = args.inference_id
+    else:
+        inference_id = vid_name
     out_folder = f'{args.out_folder}/{inference_id}'
     os.makedirs(out_folder, exist_ok=True)
     
@@ -175,4 +179,4 @@ if __name__ == "__main__":
     print(f'complete to preparing {args.model_name} inference')
 
     process_frames(list_input_path, out_folder, model, args.model_name)
-    print(f'complete to process {vid_name} at {out_folder}/{vid_name}')
+    print(f'complete to process {vid_name} at {out_folder}')
