@@ -10,6 +10,7 @@ import numpy as np
 import random
 import zipfile
 import time
+import json
 
 from utils import MEAN_PARAMS, SMPLX_DIR
 from demo import load_model, get_camera_parameters, forward_model, open_image
@@ -65,7 +66,9 @@ def extract_frames(args):
 
     subprocess.run(command, check=True)
 
-    return frame_folder, vid_name
+    fps = 30
+
+    return frame_folder, vid_name, fps
 
 def process_frames(l_frame_paths, out_folder, model, model_name):
     l_duration = []
@@ -159,8 +162,8 @@ if __name__ == "__main__":
     # check format
     assert os.path.splitext(args.vid)[1] == '.mp4', 'Only mp4 format is supported'
     
-    frame_folder, vid_name = extract_frames(args)
-    print(f'complete to extract {vid_name} at {frame_folder}')
+    frame_folder, vid_name, fps = extract_frames(args)
+    print(f'complete to extract {vid_name} / {fps} FPS at {frame_folder}')
 
     # Manage Input/Output 
     suffixes = ('.jpg', '.jpeg', '.png', '.webp')
@@ -174,6 +177,13 @@ if __name__ == "__main__":
         inference_id = vid_name
     out_folder = f'{args.out_folder}/{inference_id}'
     os.makedirs(out_folder, exist_ok=True)
+
+    meta_data = {
+        "fps": fps
+    }
+    meta_path = os.path.join(out_folder, 'meta.json')
+    with open(meta_path, "w") as meta_file:
+        json.dump(meta_data, meta_file)
     
     model = prepare_inference()
     print(f'complete to preparing {args.model_name} inference')
