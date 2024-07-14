@@ -11,6 +11,7 @@ import random
 import zipfile
 import time
 import json
+import re
 
 from utils import MEAN_PARAMS, SMPLX_DIR
 from demo import load_model, get_camera_parameters, forward_model, open_image
@@ -48,27 +49,24 @@ def prepare_inference():
     model = load_model(args.model_name)
     return model
 
-def extract_frames(args):
+def process_video(args):
     vid = args.vid
     vid_name = os.path.splitext(args.vid)[0]
     frame_folder = os.path.join(args.img_folder, vid_name)
     video_path = os.path.join(args.vid_folder, vid)
     os.makedirs(frame_folder, exist_ok=True)
 
+    # extract frames
     command = ['ffmpeg', '-i', video_path]
-
     if args.init_sec > 0:
         command.extend(['-ss', str(args.init_sec)])
     if args.duration_sec > 0:
         command.extend(['-t', str(args.duration_sec)])
-    
+    command.extend(['-vf', f"fps={args.fps}"])
     command.append(f"{frame_folder}/frame%05d.jpg")
-
     subprocess.run(command, check=True)
 
-    fps = 30
-
-    return frame_folder, vid_name, fps
+    return frame_folder, vid_name
 
 def process_frames(l_frame_paths, out_folder, model, model_name):
     l_duration = []
@@ -147,6 +145,7 @@ if __name__ == "__main__":
     parser.add_argument('--out_folder', type=str, default='/mnt/output')
     parser.add_argument('--init_sec', type=int, default=0)
     parser.add_argument('--duration_sec', type=int, default=0)
+    parser.add_argument('--fps', type=int, default=24)
     parser.add_argument("--model_name", type=str, default='multiHMR_896_L')
     parser.add_argument("--det_thresh", type=float, default=0.3)
     parser.add_argument("--nms_kernel_size", type=float, default=3)
@@ -162,8 +161,8 @@ if __name__ == "__main__":
     # check format
     assert os.path.splitext(args.vid)[1] == '.mp4', 'Only mp4 format is supported'
     
-    frame_folder, vid_name, fps = extract_frames(args)
-    print(f'complete to extract {vid_name} / {fps} FPS at {frame_folder}')
+    frame_folder, vid_name = process_video(args)
+    print(f'complete to extract {vid_name} / {args.fps} FPS at {frame_folder}')
 
     # Manage Input/Output 
     suffixes = ('.jpg', '.jpeg', '.png', '.webp')
@@ -179,7 +178,7 @@ if __name__ == "__main__":
     os.makedirs(out_folder, exist_ok=True)
 
     meta_data = {
-        "fps": fps
+        "fps": args.fps
     }
     meta_path = os.path.join(out_folder, 'meta.json')
     with open(meta_path, "w") as meta_file:
