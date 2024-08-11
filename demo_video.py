@@ -91,7 +91,7 @@ def process_frames(l_frame_paths, out_folder, model, model_name):
     output_zip = out_folder + '.zip'
     zip_npz_files(out_folder, output_zip)
 
-def process_frames_animation(l_frame_paths, out_folder, model, model_name, inference_id):
+def process_frames_animation(l_frame_paths, model):
     l_duration = []
     l_trans = []
     l_poses = []
@@ -113,8 +113,8 @@ def process_frames_animation(l_frame_paths, out_folder, model, model_name, infer
                 hand_poses = human['rotvec'][22:52].cpu().numpy()
                 jaw_pose = expand_if_1d(human['rotvec'][52].cpu().numpy())
                 l_betas.append(betas)
-                l_trans.append(np.concatenate((body_poses, jaw_pose, jaw_pose, jaw_pose, hand_poses), axis=0))
-                l_poses.append(poses)
+                l_poses.append(np.concatenate((body_poses, jaw_pose, jaw_pose, jaw_pose, hand_poses), axis=0))
+                l_trans.append(trans)
 
     print(f"Avg Multi-HMR inference time={int(1000*np.median(np.asarray(l_duration[-1:])))}ms on a {torch.cuda.get_device_name()}")
     print(f'Total process time={time.time() - start_process_frames}')
@@ -226,14 +226,14 @@ if __name__ == "__main__":
     print(f'complete to preparing {args.model_name} inference')
 
     if args.inference_animation:
-        process_frames_animation(list_input_path, out_folder, model, args.model_name)
-    else:
-        frames_dict = process_frames(list_input_path, out_folder, model, args.model_name, inference_id)
+        frames_dict = process_frames_animation(list_input_path, model)
         frames_dict['mocap_framerate'] = int(args.fps)
         frames_dict['gender'] = args.gender
 
-        save_file_name = os.path.join(out_folder, f"{inference_id}_{model_name}")
+        save_file_name = os.path.join(out_folder, f"{args.inference_id}_{args.model_name}")
         meta_fn = save_file_name+'.npz'
         np.savez(meta_fn, **frames_dict)
+    else:
+        process_frames(list_input_path, out_folder, model, args.model_name)
 
     print(f'complete to process {vid_name} at {out_folder}')
