@@ -38,6 +38,7 @@ python3.9 demo.py \
     --out_folder demo_out \
     --extra_views 1 \
     --model_name multiHMR_896_L
+```
 
 ## Run Multi-HMR on a video
 The following command will run Multi-HMR on a single video named `--vid` in the specified `--vid_folder`, and save meshes as in a '.npz' file in `--out_folder`.

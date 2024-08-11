@@ -91,6 +91,42 @@ def process_frames(l_frame_paths, out_folder, model, model_name):
     output_zip = out_folder + '.zip'
     zip_npz_files(out_folder, output_zip)
 
+def process_frames_animation(l_frame_paths, out_folder, model, model_name, inference_id):
+    l_duration = []
+    l_trans = []
+    l_poses = []
+    l_betas = []
+
+    start_process_frames = time.time()
+    for i, frame_path in enumerate(tqdm(l_frame_paths)):
+        input_path = os.path.join(args.img_folder, frame_path)
+
+        duration, humans = infer_img(input_path, model)
+        l_duration.append(duration)
+
+        expand_if_1d = lambda x: np.expand_dims(x, axis=0) if isinstance(x, np.ndarray) and x.ndim==1 else x
+        for j, human in enumerate(humans):
+            if j == 0:
+                betas = expand_if_1d(human['shape'].cpu().numpy())
+                trans = human['transl'].cpu().numpy()
+                body_poses = human['rotvec'][:22].cpu().numpy()
+                hand_poses = human['rotvec'][22:52].cpu().numpy()
+                jaw_pose = expand_if_1d(human['rotvec'][52].cpu().numpy())
+                l_betas.append(betas)
+                l_trans.append(np.concatenate((body_poses, jaw_pose, jaw_pose, jaw_pose, hand_poses), axis=0))
+                l_poses.append(poses)
+
+    print(f"Avg Multi-HMR inference time={int(1000*np.median(np.asarray(l_duration[-1:])))}ms on a {torch.cuda.get_device_name()}")
+    print(f'Total process time={time.time() - start_process_frames}')
+
+    frames_dict = {
+        'trans': l_trans,
+        'poses': l_poses,
+        'betas': l_betas[0]
+    }
+
+    return frames_dict
+
 def map_human(human):
     human_out = {
             'global_orient': human['rotvec'][0].cpu().numpy(),
@@ -151,7 +187,9 @@ if __name__ == "__main__":
     parser.add_argument("--nms_kernel_size", type=float, default=3)
     parser.add_argument("--fov", type=float, default=60)
     parser.add_argument("--distance", type=int, default=0, choices=[0,1], help='add distance on the reprojected mesh')
+    parser.add_argument("--gender", type=str, default='neutral')
     parser.add_argument("--inference_id", type=str)
+    parser.add_argument("--inference_animation", default=False, action="store_true")
     args = parser.parse_args()
 
     dict_args = vars(args)
@@ -187,5 +225,15 @@ if __name__ == "__main__":
     model = prepare_inference()
     print(f'complete to preparing {args.model_name} inference')
 
-    process_frames(list_input_path, out_folder, model, args.model_name)
+    if args.inference_animation:
+        process_frames_animation(list_input_path, out_folder, model, args.model_name)
+    else:
+        frames_dict = process_frames(list_input_path, out_folder, model, args.model_name, inference_id)
+        frames_dict['mocap_framerate'] = int(args.fps)
+        frames_dict['gender'] = args.gender
+
+        save_file_name = os.path.join(out_folder, f"{inference_id}_{model_name}")
+        meta_fn = save_file_name+'.npz'
+        np.savez(meta_fn, **frames_dict)
+
     print(f'complete to process {vid_name} at {out_folder}')
