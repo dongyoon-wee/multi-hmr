@@ -205,6 +205,7 @@ if __name__ == "__main__":
     # Manage Input/Output 
     suffixes = ('.jpg', '.jpeg', '.png', '.webp')
     list_input_path = [os.path.join(frame_folder, file) for file in os.listdir(frame_folder) if file.endswith(suffixes) and file[0] != '.']
+    list_input_path.sort()
     assert len(list_input_path) > 0, 'No frames to infer'
     print(f'The number of images to infer: {len(list_input_path)}')
 
