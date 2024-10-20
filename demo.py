@@ -34,7 +34,7 @@ def open_image(img_path, img_size, device=torch.device('cuda')):
     img_pil = ImageOps.contain(img_pil, (img_size,img_size)) # keep the same aspect ratio
 
     # Keep a copy for visualisations.
-    img_pil_bis = ImageOps.pad(img_pil.copy(), size=(img_size,img_size), color=(255, 255, 255))
+    img_pil_vis = ImageOps.pad(img_pil.copy(), size=(img_size,img_size), color=(255, 255, 255))
     img_pil = ImageOps.pad(img_pil, size=(img_size,img_size)) # pad with zero on the smallest side
 
     # Go to numpy 
@@ -43,7 +43,7 @@ def open_image(img_path, img_size, device=torch.device('cuda')):
     # Normalize and go to torch.
     resize_img = normalize_rgb(resize_img)
     x = torch.from_numpy(resize_img).unsqueeze(0).to(device)
-    return x, img_pil_bis
+    return x, img_pil_vis
 
 def get_camera_parameters(img_size, fov=60, p_x=None, p_y=None, device=torch.device('cuda')):
     """ Given image size, fov and principal point coordinates, return K the camera parameter matrix"""

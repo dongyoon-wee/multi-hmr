@@ -1,7 +1,12 @@
 import os
 
-os.environ["PYOPENGL_PLATFORM"] = "egl"
+# use gpu rendering if works
+os.environ["PYOPENGL_PLATFORM"] = "egl" 
 os.environ['EGL_DEVICE_ID'] = '0'
+"""
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'
+"""
 
 import subprocess
 import argparse
@@ -14,10 +19,11 @@ import json
 import re
 
 from utils import MEAN_PARAMS, SMPLX_DIR
-from demo import load_model, get_camera_parameters, forward_model, open_image
+from demo import load_model, get_camera_parameters, forward_model, open_image, overlay_human_meshes
 from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
+from PIL import Image
 
 torch.cuda.empty_cache()
 
@@ -49,11 +55,12 @@ def prepare_inference():
     model = load_model(args.model_name)
     return model
 
-def process_video(args):
+def decode_video(args):
     vid = args.vid
     vid_name = os.path.splitext(args.vid)[0]
     frame_folder = os.path.join(args.img_folder, vid_name)
     video_path = os.path.join(args.vid_folder, vid)
+
     os.makedirs(frame_folder, exist_ok=True)
 
     # extract frames
@@ -68,28 +75,53 @@ def process_video(args):
 
     return frame_folder, vid_name
 
-def process_frames(l_frame_paths, out_folder, model, model_name):
+def encode_video(frame_folder, output_path, fps):
+    command = ['ffmpeg', '-f', fps]
+    command.extend(['-i', f"{frame_folder}/frame%05d.jpg"])
+    command.extend(['-c:v', f"mpeg4 -pix_fmt yuv420p"])
+    command.append(f"{output_path}")
+    subprocess.run(command, check=True)
+
+    return 0
+
+def process_frames(l_frame_paths, out_folder, model, visualize, unique_color, fps):
     l_duration = []
     start_process_frames = time.time()
-    for i, frame_path in enumerate(tqdm(l_frame_paths)):
-        save_file_name = os.path.join(out_folder, f"{Path(frame_path).stem}_{model_name}")
-        input_path = os.path.join(args.img_folder, frame_path)
 
-        duration, humans = infer_img(input_path, model)
+    param_folder = f'{out_folder}/param'
+    vis_folder = f'{out_folder}/vis'
+    os.makedirs(param_folder, exist_ok=True)
+    os.makedirs(vis_folder, exist_ok=True)
+
+    for i, frame_path in enumerate(tqdm(l_frame_paths)):
+        frame_name = f"{Path(frame_path).stem}"
+        duration, humans, cam_param, img_pil_nopad = infer_img(frame_path, model)
         l_duration.append(duration)
 
         expand_if_1d = lambda x: np.expand_dims(x, axis=0) if isinstance(x, np.ndarray) and x.ndim==1 else x
         for i, human in enumerate(humans):
             human_out = map_human(human)
             human_dict = {k: expand_if_1d(v) for k, v in human_out.items()}
-            meta_fn = save_file_name+'_'+str(i)+'.npz'
-            np.savez(meta_fn, **human_dict)
+
+            param_path = os.path.join(param_folder , f"{frame_name}_{i}.npz")
+            np.savez(param_path, **human_dict)
+
+        if visualize:
+            vis_path = os.path.join(vis_folder, f"{frame_name}.jpg")
+            img_array = np.asarray(img_pil_nopad)
+            img_pil_visu= Image.fromarray(img_array)
+            pred_rend_array, _color = overlay_human_meshes(humans, cam_param, model, img_pil_visu, unique_color)
+            Image.fromarray(pred_rend_array).save(vis_path)
 
     print(f"Avg Multi-HMR inference time={int(1000*np.median(np.asarray(l_duration[-1:])))}ms on a {torch.cuda.get_device_name()}")
     print(f'Total process time={time.time() - start_process_frames}')
 
     output_zip = out_folder + '.zip'
     zip_npz_files(out_folder, output_zip)
+
+    if visualize:
+        encode_video(vis_folder, out_folder + '.mp4', fps)
+
 
 def process_frames_animation(l_frame_paths, model):
     l_duration = []
@@ -101,7 +133,7 @@ def process_frames_animation(l_frame_paths, model):
     for i, frame_path in enumerate(tqdm(l_frame_paths)):
         input_path = os.path.join(args.img_folder, frame_path)
 
-        duration, humans = infer_img(input_path, model)
+        duration, humans, cam_param, img_pil_nopad = infer_img(input_path, model)
         l_duration.append(duration)
 
         expand_if_1d = lambda x: np.expand_dims(x, axis=0) if isinstance(x, np.ndarray) and x.ndim==1 else x
@@ -156,7 +188,7 @@ def infer_img(img_path, m):
                             nms_kernel_size=args.nms_kernel_size)
     duration = time.time() - start
 
-    return duration, outputs
+    return duration, outputs, K, img_pil_nopad
 
 def zip_npz_files(folder_path, output_zip):
     # Create a ZipFile object in write mode
@@ -190,6 +222,8 @@ if __name__ == "__main__":
     parser.add_argument("--gender", type=str, default='neutral')
     parser.add_argument("--inference_id", type=str)
     parser.add_argument("--inference_animation", default=False, action="store_true")
+    parser.add_argument("--visualize", default=False, action="store_true")
+    parser.add_argument("--unique_color", default=False, action="store_true")
     args = parser.parse_args()
 
     dict_args = vars(args)
@@ -199,7 +233,7 @@ if __name__ == "__main__":
     # check format
     assert os.path.splitext(args.vid)[1] == '.mp4', 'Only mp4 format is supported'
     
-    frame_folder, vid_name = process_video(args)
+    frame_folder, vid_name = decode_video(args)
     print(f'complete to extract {vid_name} / {args.fps} FPS at {frame_folder}')
 
     # Manage Input/Output 
@@ -212,10 +246,12 @@ if __name__ == "__main__":
     if args.inference_id:
         inference_id = args.inference_id
     else:
-        inference_id = vid_name
-    out_folder = f'{args.out_folder}/{inference_id}'
+        current_time = time.localtime()
+        inference_id = time.strftime("%Y%m%d%H%M", current_time)
+    out_folder = f'{args.out_folder}/{vid_name}_{inference_id}'
     os.makedirs(out_folder, exist_ok=True)
 
+    # Manage Meta
     meta_data = {
         "fps": args.fps
     }
@@ -223,6 +259,7 @@ if __name__ == "__main__":
     with open(meta_path, "w") as meta_file:
         json.dump(meta_data, meta_file)
     
+    # Manage inference
     model = prepare_inference()
     print(f'complete to preparing {args.model_name} inference')
 
@@ -235,6 +272,6 @@ if __name__ == "__main__":
         meta_fn = save_file_name+'.npz'
         np.savez(meta_fn, **frames_dict)
     else:
-        process_frames(list_input_path, out_folder, model, args.model_name)
+        process_frames(list_input_path, out_folder, model, args.visualize, args.unique_color, args.fps)
 
     print(f'complete to process {vid_name} at {out_folder}')
